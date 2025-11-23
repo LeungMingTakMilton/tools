@@ -1,100 +1,118 @@
 <!DOCTYPE html><html lang="en"><head><meta name="x-poe-datastore-behavior" content="local_only"><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://unpkg.com https://d3js.org https://threejs.org https://cdn.plot.ly https://stackpath.bootstrapcdn.com https://maps.googleapis.com https://cdn.tailwindcss.com https://ajax.googleapis.com https://kit.fontawesome.com https://cdn.datatables.net https://maxcdn.bootstrapcdn.com https://code.highcharts.com https://tako-static-assets-production.s3.amazonaws.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com https://pfst.cf2.poecdn.net https://puc.poecdn.net https://i.imgur.com https://wikimedia.org https://*.icons8.com https://*.giphy.com https://picsum.photos https://images.unsplash.com; frame-src 'self' https://www.youtube.com https://trytako.com; child-src 'self'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests; block-all-mixed-content;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markdown to Static HTML Converter</title>
+    <title>Advanced Markdown to HTML Converter</title>
     
-    <!-- CSS Libraries -->
-    <!-- CodeMirror (Editor) -->
+    <!-- External Styles -->
+    <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
-    <!-- KaTeX (Math) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css">
-    <!-- Highlight.js (Code Syntax) -->
+    <!-- KaTeX CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <!-- Highlight.js CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
 
     <style>
         :root {
             --bg-color: #1e1e1e;
-            --header-bg: #2d2d2d;
             --text-color: #e0e0e0;
-            --border-color: #444;
+            --border-color: #333;
             --accent-color: #007acc;
+            --header-height: 50px;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; }
 
-        body {
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            overflow: hidden; /* Prevent body scroll, handle in panes */
         }
 
-        /* Header */
+        /* Header / Toolbar */
         header {
-            background-color: var(--header-bg);
-            padding: 0.5rem 1rem;
-            border-bottom: 1px solid var(--border-color);
+            height: var(--header-height);
+            background-color: #252526;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            height: 50px;
+            justify-content: space-between;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--border-color);
         }
 
-        h1 { font-size: 1.2rem; font-weight: 600; }
+        h1 { font-size: 1.2rem; margin: 0; }
 
-        .btn {
+        button {
             background-color: var(--accent-color);
             color: white;
             border: none;
-            padding: 0.5rem 1rem;
+            padding: 8px 16px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.9rem;
             transition: background 0.2s;
         }
 
-        .btn:hover { background-color: #005fa3; }
+        button:hover { background-color: #005fa3; }
 
-        /* Main Layout */
-        main {
+        /* Main Container */
+        #main-container {
             display: flex;
-            flex: 1;
-            height: calc(100vh - 50px);
+            height: calc(100vh - var(--header-height));
+            width: 100%;
+            position: relative;
         }
 
         /* Editor Pane */
         #editor-pane {
-            flex: 1;
-            border-right: 1px solid var(--border-color);
+            width: 50%;
+            height: 100%;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            position: relative;
         }
 
+        /* CodeMirror Customization */
         .CodeMirror {
-            height: 100% !important;
-            font-family: 'Fira Code', monospace;
+            height: 100%;
+            font-family: 'Fira Code', 'Consolas', monospace;
             font-size: 14px;
+            line-height: 1.5;
         }
+
+        /* Resizer Handle */
+        #resizer {
+            width: 8px;
+            background-color: #2d2d2d;
+            cursor: col-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            border-left: 1px solid #000;
+            border-right: 1px solid #000;
+        }
+        
+        #resizer::after {
+            content: "||";
+            color: #555;
+            font-size: 10px;
+        }
+
+        #resizer:hover { background-color: var(--accent-color); }
 
         /* Preview Pane */
         #preview-pane {
-            flex: 1;
-            padding: 2rem;
+            flex: 1; /* Takes remaining space */
+            height: 100%;
             overflow-y: auto;
-            background-color: #ffffff;
-            color: #24292e; /* Github markdown color */
-        }
-
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            main { flex-direction: column; }
-            #editor-pane { border-right: none; border-bottom: 1px solid var(--border-color); height: 50%; }
-            #preview-pane { height: 50%; padding: 1rem; }
+            padding: 20px;
+            background-color: white;
+            color: #24292e; /* GitHub markdown color */
         }
 
         /* Markdown Content Styles (GitHub-like) */
@@ -104,52 +122,78 @@
             line-height: 1.5;
             word-wrap: break-word;
         }
-        .markdown-body h1, .markdown-body h2 { border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
-        .markdown-body blockquote { border-left: .25em solid #dfe2e5; color: #6a737d; padding: 0 1em; }
+        .markdown-body img { max-width: 100%; }
+        .markdown-body table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+        .markdown-body th, .markdown-body td { border: 1px solid #dfe2e5; padding: 6px 13px; }
+        .markdown-body tr:nth-child(2n) { background-color: #f6f8fa; }
         .markdown-body pre { background-color: #f6f8fa; padding: 16px; border-radius: 6px; overflow: auto; }
-        .markdown-body code { font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace; background-color: rgba(27,31,35,.05); padding: .2em .4em; border-radius: 3px; }
-        .markdown-body pre code { background: none; padding: 0; }
-        .markdown-body table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
-        .markdown-body table th, .markdown-body table td { border: 1px solid #dfe2e5; padding: 6px 13px; }
-        .markdown-body table tr:nth-child(2n) { background-color: #f6f8fa; }
-        .markdown-body img { max-width: 100%; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        
-        /* Mermaid alignment */
-        .mermaid { display: flex; justify-content: center; margin: 1rem 0; }
+        .markdown-body code { font-family: 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; background-color: rgba(27,31,35,.05); padding: .2em .4em; border-radius: 3px; }
+        .markdown-body pre code { background-color: transparent; padding: 0; }
+        .markdown-body blockquote { border-left: .25em solid #dfe2e5; color: #6a737d; padding: 0 1em; margin: 0; }
+
+        /* Mermaid container centering */
+        .mermaid { display: flex; justify-content: center; margin: 20px 0; }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            #main-container { flex-direction: column; }
+            #editor-pane { width: 100% !important; height: 50%; }
+            #resizer { 
+                width: 100%; 
+                height: 8px; 
+                cursor: row-resize; 
+                border: none;
+                border-top: 1px solid #000;
+                border-bottom: 1px solid #000;
+            }
+            #resizer::after { content: "="; transform: rotate(90deg); }
+            #preview-pane { width: 100% !important; height: 50%; }
+        }
     </style>
 <script src="https://puc.poecdn.net/authenticated_preview_page/syncedState.3f7572448765332f3047.js"></script></head>
 <body>
 
 <header>
-    <h1>MD to Static HTML</h1>
-    <button class="btn" onclick="exportHtml()">Export Static HTML</button>
+    <h1>MD Live Editor</h1>
+    <button onclick="exportHtml()">Export HTML (Static)</button>
 </header>
 
-<main>
+<div id="main-container">
     <div id="editor-pane">
         <textarea id="code-editor"></textarea>
     </div>
+    <div id="resizer"></div>
     <div id="preview-pane" class="markdown-body">
-        <!-- Rendered content goes here -->
+        <!-- Content rendered here -->
     </div>
-</main>
+</div>
 
-<!-- JS Libraries -->
-<!-- Markdown Parser -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
-<!-- CodeMirror -->
+<!-- Scripts -->
+<!-- 1. CodeMirror -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/xml/xml.min.js"></script>
-<!-- KaTeX -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.js"></script>
-<!-- Mermaid -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
-<!-- Highlight.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/xml/xml.min.js"></script> <!-- For HTML inside MD -->
+
+<!-- 2. Markdown-it & Plugins -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-texmath/texmath.min.js"></script>
+
+<!-- 3. KaTeX -->
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+
+<!-- 4. Highlight.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
 
+<!-- 5. Mermaid -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+
 <script>
-    // 1. Initialization
+    // --- Initialization ---
+
+    // Initialize Mermaid
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+    // Initialize Markdown-it
     const md = window.markdownit({
         html: true,
         linkify: true,
@@ -164,177 +208,271 @@
         }
     });
 
-    // Initialize Mermaid
-    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+    // Use TeXMath plugin with KaTeX
+    md.use(texmath, {
+        engine: katex,
+        delimiters: 'dollars',
+        katexOptions: { macros: { "\\RR": "\\mathbb{R}" } }
+    });
 
-    // Initialize CodeMirror Editor
-    const editor = CodeMirror.fromTextArea(document.getElementById("code-editor"), {
-        mode: "markdown",
-        theme: "dracula",
+    // Custom Fence for Mermaid
+    const defaultFence = md.renderer.rules.fence;
+    md.renderer.rules.fence = function (tokens, idx, options, env, self) {
+        const token = tokens[idx];
+        const info = token.info.trim();
+        
+        if (info === 'mermaid') {
+            // Return a div that Mermaid will find later
+            // We escape the content to prevent HTML injection before mermaid processes it
+            return `<div class="mermaid">${token.content}</div>`;
+        }
+        
+        // Pass other languages to default renderer (which uses highlight.js)
+        return defaultFence(tokens, idx, options, env, self);
+    };
+
+    // Initialize CodeMirror
+    const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+        mode: 'markdown',
+        theme: 'dracula',
         lineNumbers: true,
-        lineWrapping: true,
+        lineWrapping: true, // Critical for long base64 strings
         indentUnit: 4
     });
 
-    // Set default content
-    const defaultContent = `# Welcome to the Converter
+    // Default Content
+    const defaultContent = 
+`# Welcome to MD Live Editor
 
-## Features
-1. **Syntax Highlighting**:
+Try dragging an **image** or a **CSV file** here!
+
+## 1. Code Syntax
 \`\`\`javascript
-function hello() {
-  console.log("Hello World");
-}
+console.log("Hello World");
+const add = (a, b) => a + b;
 \`\`\`
 
-2. **LaTeX Math**:
-The quadratic formula is $$x = {-b \\pm \\sqrt{b^2-4ac} \\over 2a}$$
-
-3. **Mermaid Graphs**:
+## 2. Mermaid Graphs
 \`\`\`mermaid
 graph TD;
-    A[User Input] --> B{Markdown?};
-    B -- Yes --> C[Render HTML];
-    B -- No --> D[Plain Text];
-    C --> E[Export Static HTML];
+    A[User Input] -->|Parse| B(Markdown Engine);
+    B --> C{Has Mermaid?};
+    C -->|Yes| D[Render SVG];
+    C -->|No| E[Render HTML];
 \`\`\`
 
-4. **Tables**:
+## 3. LaTeX Math
+The quadratic formula is:
+$$ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} $$
 
-| Feature | Status |
-| :--- | :--- |
-| Responsive | ✅ |
-| Drag & Drop | ✅ |
-| Export | ✅ |
-
-Try dragging an image here!
+## 4. Tables
+| Item | Quantity | Price |
+|------|----------|-------|
+| Apple| 5        | $1.00 |
+| Pear | 2        | $2.50 |
 `;
+
     editor.setValue(defaultContent);
 
-    // 2. Logic for Rendering
+    // --- Logic ---
+
     const previewPane = document.getElementById('preview-pane');
-    let timer;
+    let renderTimeout = null;
 
-    function render() {
-        const rawMarkdown = editor.getValue();
+    // Render Function
+    async function render() {
+        const markdownText = editor.getValue();
         
-        // Step A: Pre-process LaTeX (Simple regex approach for $$...$$ and $...$)
-        // Note: A full tokenizer is better for production, but this works for general use.
-        let processedMarkdown = rawMarkdown.replace(/\$\$([\s\S]+?)\$\$/g, (match, tex) => {
-            try {
-                return katex.renderToString(tex, { displayMode: true });
-            } catch (e) { return match; }
-        });
-        
-        processedMarkdown = processedMarkdown.replace(/\$([^$]+?)\$/g, (match, tex) => {
-            try {
-                return katex.renderToString(tex, { displayMode: false });
-            } catch (e) { return match; }
-        });
+        // 1. Convert Markdown to HTML
+        const renderedHTML = md.render(markdownText);
+        previewPane.innerHTML = renderedHTML;
 
-        // Step B: Custom Fence for Mermaid
-        // We intercept the 'mermaid' language block and return a div that mermaid.js will target later
-        const originalFence = md.renderer.rules.fence;
-        md.renderer.rules.fence = function (tokens, idx, options, env, self) {
-            const token = tokens[idx];
-            const info = token.info.trim();
-            if (info === 'mermaid') {
-                return `<div class="mermaid">${token.content}</div>`;
-            }
-            // Pass others to default highlighter
-            return originalFence ? originalFence(tokens, idx, options, env, self) : '';
-        };
-
-        // Step C: Render Markdown to HTML
-        previewPane.innerHTML = md.render(processedMarkdown);
-
-        // Step D: Render Mermaid Diagrams
-        // Mermaid looks for .mermaid classes and turns text into SVG
-        mermaid.run({
-            nodes: previewPane.querySelectorAll('.mermaid')
-        });
+        // 2. Render Mermaid Diagrams
+        // We select all .mermaid divs and ask mermaid to process them
+        try {
+            await mermaid.run({
+                nodes: document.querySelectorAll('.mermaid')
+            });
+        } catch (e) {
+            console.error("Mermaid error:", e);
+        }
     }
 
-    // Debounce rendering (wait 300ms after typing stops)
-    editor.on("change", () => {
-        clearTimeout(timer);
-        timer = setTimeout(render, 300);
+    // Debounce rendering to improve performance
+    editor.on('change', () => {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(render, 300);
     });
 
     // Initial Render
     render();
 
-    // 3. Drag and Drop Image Handling
-    const editorElement = document.querySelector('.CodeMirror');
-    
-    editorElement.addEventListener('dragover', (e) => {
+    // --- Drag & Drop and Paste Handling ---
+
+    const editorWrapper = document.querySelector('.CodeMirror');
+
+    // Helper: Insert text at cursor position
+    function insertAtCursor(text) {
+        const doc = editor.getDoc();
+        const cursor = doc.getCursor();
+        doc.replaceRange(text, cursor);
+    }
+
+    // Helper: Convert CSV to Markdown Table
+    function csvToMarkdown(csvText) {
+        const rows = csvText.split(/\r?\n/).filter(row => row.trim() !== '');
+        if (rows.length === 0) return '';
+
+        let mdTable = '\n';
+        
+        // Process header
+        const headers = rows[0].split(',').map(h => h.trim());
+        mdTable += '| ' + headers.join(' | ') + ' |\n';
+        mdTable += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+
+        // Process body
+        for (let i = 1; i < rows.length; i++) {
+            // Simple CSV split (Note: doesn't handle commas inside quotes perfectly for simplicity)
+            const cells = rows[i].split(',').map(c => c.trim());
+            mdTable += '| ' + cells.join(' | ') + ' |\n';
+        }
+        return mdTable + '\n';
+    }
+
+    // Handle File Processing
+    function processFile(file) {
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64 = e.target.result;
+                const imgTag = `\n![${file.name}](${base64})\n`;
+                insertAtCursor(imgTag);
+            };
+            reader.readAsDataURL(file);
+        } else if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const tableMd = csvToMarkdown(e.target.result);
+                insertAtCursor(tableMd);
+            };
+            reader.readAsText(file);
+        }
+    }
+
+    // Drag & Drop Events
+    editorWrapper.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
     });
 
-    editorElement.addEventListener('drop', (e) => {
+    editorWrapper.addEventListener('drop', (e) => {
         e.preventDefault();
         e.stopPropagation();
         
         const files = e.dataTransfer.files;
         if (files.length > 0) {
-            const file = files[0];
-            if (file.type.startsWith('image/')) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const base64 = event.target.result;
-                    const doc = editor.getDoc();
-                    const cursor = doc.getCursor();
-                    const imageMarkdown = `![${file.name}](${base64})\n`;
-                    doc.replaceRange(imageMarkdown, cursor);
-                };
-                reader.readAsDataURL(file);
+            processFile(files[0]);
+        }
+    });
+
+    // Paste Events (Screenshots)
+    document.addEventListener('paste', (e) => {
+        // Only intercept if editor is focused or active
+        if (!editorWrapper.contains(document.activeElement) && document.activeElement.tagName !== 'TEXTAREA') return;
+
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        for (let index in items) {
+            const item = items[index];
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                const blob = item.getAsFile();
+                processFile(blob);
+                e.preventDefault(); // Prevent default paste behavior for images
             }
         }
     });
 
-    // 4. Export Functionality
-    function exportHtml() {
-        // We clone the preview pane to get the computed HTML (including SVGs generated by Mermaid and HTML generated by KaTeX)
-        const content = previewPane.innerHTML;
+    // --- Resizable Split Pane ---
+    const resizer = document.getElementById('resizer');
+    const editorPane = document.getElementById('editor-pane');
+    const mainContainer = document.getElementById('main-container');
 
-        // We need to include the CSS for KaTeX, Highlight.js, and basic Markdown styling
-        // so the file looks good offline without JS.
-        const htmlTemplate = `
+    let isResizing = false;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.body.style.cursor = window.innerWidth > 768 ? 'col-resize' : 'row-resize';
+        document.body.style.userSelect = 'none'; // Disable text selection while dragging
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+
+        const containerRect = mainContainer.getBoundingClientRect();
+        const isDesktop = window.innerWidth > 768;
+
+        if (isDesktop) {
+            // Horizontal resize
+            const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+            if (newWidth > 10 && newWidth < 90) {
+                editorPane.style.width = `${newWidth}%`;
+            }
+        } else {
+            // Vertical resize
+            const newHeight = ((e.clientY - containerRect.top) / containerRect.height) * 100;
+            if (newHeight > 10 && newHeight < 90) {
+                editorPane.style.height = `${newHeight}%`;
+            }
+        }
+        // Refresh CodeMirror layout
+        editor.refresh();
+    });
+
+    document.addEventListener('mouseup', () => {
+        isResizing = false;
+        document.body.style.cursor = 'default';
+        document.body.style.userSelect = 'auto';
+    });
+
+    // --- Export Functionality ---
+    function exportHtml() {
+        // Clone the preview pane to manipulate it without affecting the view
+        const clone = previewPane.cloneNode(true);
+
+        // 1. Handle Mermaid: They are already SVGs in the DOM.
+        // We just need to ensure they have explicit dimensions or styles if necessary.
+        // The current state of 'clone' contains <svg> elements generated by Mermaid.
+        
+        // 2. Handle LaTeX: KaTeX renders HTML/MathML. It is static HTML, so it persists.
+        
+        // Create the full HTML document
+        const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Exported Markdown</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #24292e;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; }
         img { max-width: 100%; }
-        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
         th, td { border: 1px solid #dfe2e5; padding: 6px 13px; }
         tr:nth-child(2n) { background-color: #f6f8fa; }
         pre { background-color: #f6f8fa; padding: 16px; border-radius: 6px; overflow: auto; }
-        blockquote { border-left: 4px solid #dfe2e5; color: #6a737d; padding-left: 1em; margin-left: 0; }
-        /* Ensure Mermaid SVGs are centered and responsive */
-        .mermaid { display: flex; justify-content: center; margin: 2rem 0; }
-        svg { max-width: 100%; height: auto; }
+        blockquote { border-left: .25em solid #dfe2e5; color: #6a737d; padding: 0 1em; }
+        .mermaid { display: flex; justify-content: center; margin: 20px 0; }
     </style>
 </head>
 <body>
-    ${content}
+    ${clone.innerHTML}
 </body>
 </html>`;
 
-        const blob = new Blob([htmlTemplate], { type: 'text/html' });
+        // Trigger Download
+        const blob = new Blob([htmlContent], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -344,6 +482,7 @@ Try dragging an image here!
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
+
 </script>
 
 
