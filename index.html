@@ -2,6 +2,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Markdown to HTML Converter</title>
+    <!-- CSP FIX: Explicitly allow images from any source (*), plus data: and blob: schemes -->
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline';">
     
     <!-- External Styles -->
     <!-- CodeMirror CSS -->
