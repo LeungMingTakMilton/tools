@@ -1,0 +1,266 @@
+<!DOCTYPE html><html lang="en"><head><meta name="x-poe-datastore-behavior" content="local_only">
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" 
+        content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*; 
+                img-src 'self' data: blob: https://* https://tile.openstreetmap.org; 
+                frame-src 'self' https://www.youtube.com https://try.t; 
+                child-src 'self'; 
+                manifest-src 'self'; 
+                worker-src 'self'; 
+                upgrade-insecure-requests; 
+                block-all-mixed-content;">
+
+
+    <title>Vienna &amp; Salzburg Itinerary</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        :root {
+            --primary: #c23b22; /* Austrian Red */
+            --secondary: #2c3e50;
+            --bg: #f8f9fa;
+            --text: #333;
+            --timeline-line: #ddd;
+        }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; }
+        
+        /* Header & Nav */
+        header { background: var(--secondary); color: white; padding: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); z-index: 1000; flex-shrink: 0; }
+        h1 { margin: 0 0 10px 0; font-size: 1.4rem; }
+        .nav-tabs { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+        .tab-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 8px 14px; border-radius: 20px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+        .tab-btn:hover, .tab-btn.active { background: var(--primary); border-color: var(--primary); font-weight: bold; transform: translateY(-1px); }
+
+        /* Layout */
+        .container { display: flex; flex: 1; overflow: hidden; position: relative; }
+        
+        /* Map */
+        #map { flex: 2; height: 100%; min-height: 300px; z-index: 1; }
+
+        /* Sidebar / Timeline */
+        .sidebar { flex: 1; background: white; overflow-y: auto; padding: 20px; box-shadow: -2px 0 10px rgba(0,0,0,0.1); min-width: 320px; max-width: 450px; z-index: 2; display: flex; flex-direction: column; }
+        .sidebar-header { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        .sidebar-header h2 { margin: 0; font-size: 1.2rem; color: var(--secondary); }
+        
+        /* Timeline Items */
+        .timeline { padding-left: 10px; }
+        .timeline-item { border-left: 2px solid var(--timeline-line); padding-left: 20px; padding-bottom: 25px; position: relative; cursor: pointer; transition: background 0.2s; border-radius: 0 8px 8px 0; }
+        .timeline-item:hover { background: #f9f9f9; }
+        .timeline-item:last-child { border-left-color: transparent; }
+        
+        .timeline-marker { position: absolute; left: -9px; top: 0; width: 16px; height: 16px; background: var(--primary); border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); text-align: center; color: white; font-size: 10px; line-height: 16px; }
+        
+        .time { font-weight: bold; color: var(--primary); font-size: 0.85rem; display: block; margin-bottom: 2px; }
+        .activity { font-size: 1rem; font-weight: 700; margin: 0 0 4px 0; color: var(--secondary); }
+        .location { font-size: 0.85rem; color: #555; margin-bottom: 4px; display: flex; align-items: center; gap: 5px; }
+        .transport { font-size: 0.8rem; background: #eef2f5; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 4px; color: #444; border: 1px solid #dee2e6; }
+        .notes { font-size: 0.85rem; color: #666; margin-top: 6px; font-style: italic; line-height: 1.4; }
+        
+        .links { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+        .link-btn { font-size: 0.75rem; color: var(--primary); text-decoration: none; border: 1px solid var(--primary); padding: 2px 8px; border-radius: 4px; display: inline-block; transition: all 0.2s; }
+        .link-btn:hover { background: var(--primary); color: white; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { flex-direction: column-reverse; }
+            #map { flex: 1; min-height: 45vh; }
+            .sidebar { flex: 1; min-width: auto; max-width: none; padding: 15px; }
+        }
+
+        /* Leaflet Customization */
+        .custom-popup .leaflet-popup-content-wrapper { border-radius: 8px; padding: 0; overflow: hidden; }
+        .custom-popup .leaflet-popup-content { margin: 0; }
+        .popup-header { background: var(--primary); color: white; padding: 8px 12px; font-weight: bold; font-size: 0.9rem; }
+        .popup-body { padding: 10px 12px; font-size: 0.85rem; }
+        .popup-time { color: #666; font-weight: bold; margin-bottom: 4px; display: block; }
+    </style>
+<script src="https://puc.poecdn.net/authenticated_preview_page/syncedState.3f7572448765332f3047.js"></script></head>
+<body>
+
+<header>
+    <h1>Vienna &amp; Salzburg Itinerary</h1>
+    <div class="nav-tabs">
+        <button class="tab-btn active" onclick="loadDay(1)">Day 1: Arrival</button>
+        <button class="tab-btn" onclick="loadDay(2)">Day 2: Salzburg</button>
+        <button class="tab-btn" onclick="loadDay(3)">Day 3: Theater</button>
+        <button class="tab-btn" onclick="loadDay(4)">Day 4: City Center</button>
+    </div>
+</header>
+
+<div class="container">
+    <div id="map"></div>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2 id="day-title">Day 1 Overview</h2>
+        </div>
+        <div id="timeline" class="timeline">
+            <!-- Timeline content injected via JS -->
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Data Structure ---
+    const itinerary = {
+        1: {
+            title: "Day 1: Arrival & Imperial Vienna",
+            items: [
+                { time: "06:20", activity: "Arrive at VIE Airport", location: "VIE Airport", coords: [48.1103, 16.5697], transport: "Flight", notes: "Welcome to Vienna!" },
+                { time: "06:20 - 07:30", activity: "CAT Train to City", location: "Wien Mitte Station", coords: [48.2064, 16.3853], transport: "City Airport Train (~30mins)", notes: "Fastest transfer to city." },
+                { time: "07:30 - 08:00", activity: "Travel to Hostel", location: "JO&JOE Vienna (Europaplatz)", coords: [48.1973, 16.3377], transport: "U3 Ottakring to Westbahnhof (~15mins)", notes: "Check-in/Drop bags." },
+                { time: "10:00 - 13:00", activity: "Schönbrunn Palace Tour", location: "Schönbrunn Palace", coords: [48.1848, 16.3122], transport: "Tram 52/60 or U6/U4", notes: "Imperial summer residence.", links: [{label: "Website", url: "https://www.schoenbrunn.at/en/"}] },
+                { time: "13:00 - 14:30", activity: "Lunch Break", location: "Near Schönbrunn", coords: [48.1855, 16.3150], transport: "Walking", notes: "Eat locally near palace." },
+                { time: "16:30 - 19:30", activity: "Hundertwasser Village", location: "Hundertwasserhaus", coords: [48.2076, 16.3942], transport: "U4 to Landstraße", notes: "Unique architectural landmark." },
+                { time: "19:30 - 20:30", activity: "Meetup and Dinner", location: "Hundertwasser Village", coords: [48.2076, 16.3942], transport: "Walking", notes: "Meet up with Eva." },
+                { time: "20:30 - 22:00", activity: "Rathaus Christmas Market", location: "Rathausplatz", coords: [48.2106, 16.3588], transport: "Tram 1", notes: "Famous Christmas market." },
+                { time: "20:30 - 22:00", activity: "Concert (Proposed)", location: "St. Stephen's Cathedral", coords: [48.2085, 16.3738], transport: "U3 to Stephansplatz", notes: "Classical concert.", links: [{label: "Klook", url: "https://www.klook.com/zh-HK/activity/149465-classical-concerts-at-st-stephen-s-cathedral-in-austria/"}] },
+                { time: "22:00+", activity: "Return to Hostel", location: "JO&JOE Vienna", coords: [48.1973, 16.3377], transport: "U3 Tram", notes: "Rest for tomorrow." }
+            ]
+        },
+        2: {
+            title: "Day 2: Salzburg Day Trip",
+            items: [
+                { time: "07:30 - 08:00", activity: "Travel to Meidling Station", location: "Vienna Meidling", coords: [48.1744, 16.3335], transport: "U6 (~10 min)", notes: "Head to train station." },
+                { time: "08:04 - 10:49", activity: "Train to Salzburg", location: "Salzburg Hbf", coords: [47.8130, 13.0454], transport: "ÖBB Train (~2.5 hrs)", notes: "Enjoy the scenic ride.", links: [{label: "Rail Europe", url: "https://www.raileurope.com/en/journey/vienna-meidling-salzburg-hbf-482q3i?currency=USD"}] },
+                { time: "10:30 - 12:30", activity: "Salzburg Old Town", location: "Salzburg Altstadt", coords: [47.7990, 13.0436], transport: "Bus/Walk", notes: "UNESCO World Heritage site.", links: [{label: "Salzburg 24hr pass", url: "https://card-webshop.feratel.com/scc01/default/?language=en#category:card"}]},
+                { time: "13:30 - 15:00", activity: "Hohensalzburg Fortress", location: "Festung Hohensalzburg", coords: [47.7950, 13.0474], transport: "Funicular", notes: "Iconic castle on the hill." },
+                { time: "15:00 - 16:30", activity: "Salzburg Cathedral & Mozart", location: "Salzburg Cathedral", coords: [47.7979, 13.0467], transport: "Walking", notes: "Baptism site of Mozart." },
+                { time: "18:07 - 20:25", activity: "Return Train to Vienna", location: "Vienna Hbf", coords: [48.1851, 16.3764], transport: "ÖBB Train", notes: "Return trip." },
+                { time: "20:30 - 22:00", activity: "Rathaus Christmas Market", location: "Rathausplatz", coords: [48.2106, 16.3588], transport: "Tram/Walk", notes: "Evening market visit (Optional)." },
+                { time: "21:30+", activity: "Sleep", location: "JO&JOE Vienna", coords: [48.1973, 16.3377], transport: "Tram/Walk", notes: "End of long day." }
+            ]
+        },
+        3: {
+            title: "Day 3: Theater & Relaxation",
+            items: [
+                { time: "Morning", activity: "Rest & Recovery", location: "JO&JOE Vienna", coords: [48.1973, 16.3377], transport: "N/A", notes: "Relax after Salzburg trip." },
+                { time: "18:00 - 18:30", activity: "Travel to Theater", location: "Raimund Theater", coords: [48.1918, 16.3406], transport: "U6/U-Bahn (~15-20 min)", notes: "Head to venue." },
+                { time: "18:30 - 21:00", activity: "Phantom of the Opera", location: "Raimund Theater", coords: [48.1918, 16.3406], transport: "Theater Venue", notes: "Musical performance.", links: [{label: "Tickets", url: "https://www.viennaticketoffice.com/the-phantom-of-the-opera-tickets-411305-en.html?AFF=G_adsAlles&utm_source=google&utm_medium=cpc&utm_campaign=VA_OE_EN&utm_term=&utm_content=134979955410&gclid=Cj0KCQiA9OnJBhD-ARIsAPV51xNQtyGRJMgrHpdQXzvVGmYgiQED5Hklyl1FM-qyDssoGUq4Ic0mdrsaAksdEALw_wcB&adpos=&gad_source=1&gad_campaignid=17951524972&gbraid=0AAAAACYy9Eg048He3uclOTyp3wkcUL5Uy&gclid=Cj0KCQiA9OnJBhD-ARIsAPV51xNQtyGRJMgrHpdQXzvVGmYgiQED5Hklyl1FM-qyDssoGUq4Ic0mdrsaAksdEALw_wcB"}] },
+                { time: "21:00 - 22:00", activity: "Late Night Market", location: "Rathausplatz", coords: [48.2106, 16.3588], transport: "U-Bahn", notes: "Quick stop if energy permits." },
+                { time: "22:00+", activity: "Return to Hostel", location: "JO&JOE Vienna", coords: [48.1973, 16.3377], transport: "U-Bahn/Tram", notes: "Sleep." }
+            ]
+        },
+        4: {
+            title: "Day 4: City Center & Shopping",
+            items: [
+                { time: "09:00 - 10:30", activity: "St. Stephen's Cathedral", location: "Stephansplatz", coords: [48.2085, 16.3738], transport: "U3 from Westbahnhof", notes: "Cathedral & Dom Museum.", links: [{label: "Klook", url: "https://www.klook.com/zh-HK/activity/130329-st-stephen-cathedral-and-dom-museum-wien-ticket-in-vienna/"}] },
+                { time: "10:30 - 11:00", activity: "Graben & Plague Column", location: "Pestsäule", coords: [48.2091, 16.3702], transport: "Walking", notes: "Historic landmark." },
+                { time: "11:00 - 12:30", activity: "Kohlmarkt Luxury Shopping", location: "Kohlmarkt", coords: [48.2093, 16.3675], transport: "Walking", notes: "High-end brands & Julius Meinl." },
+                { time: "12:30 - 13:30", activity: "Lunch at Café Central", location: "Café Central", coords: [48.2104, 16.3654], transport: "Walking", notes: "Historic coffee house experience." },
+                { time: "13:30 - 15:00", activity: "Kärntner Straße", location: "Kärntner Straße", coords: [48.2040, 16.3705], transport: "Walking", notes: "Main shopping street." },
+                { time: "18:30 - 19:00", activity: "Votivkirche Light Show", location: "Votivkirche", coords: [48.2153, 16.3584], transport: "Tram/Walk", notes: "Immersive light experience.", links: [{label: "GetYourGuide", url: "https://www.getyourguide.com/vienna-l7/vienna-light-of-creation-votive-church-immersive-light-show-t877892?ranking_uuid=002af925-67a2-43d4-8ff2-33939d183e1f&date_from=2025-12-17&_pc=1,4"}] },
+                { time: "20:00 - 21:00", activity: "Final Market Visit", location: "Rathausplatz", coords: [48.2106, 16.3588], transport: "Walking", notes: "One last Glühwein." },
+                { time: "21:00+", activity: "Departure / Rest", location: "Westbahnhof", coords: [48.1973, 16.3377], transport: "U3", notes: "End of trip." }
+            ]
+        }
+    };
+
+    // --- Map Initialization ---
+    // Using standard OpenStreetMap tiles to avoid CSP issues
+    const map = L.map('map').setView([48.2082, 16.3738], 13); 
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    let currentMarkers = [];
+    let currentPolyline = null;
+
+    // --- Icons ---
+    const numberIcon = (num) => L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: #c23b22; width: 24px; height: 24px; border-radius: 50%; color: white; text-align: center; line-height: 24px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3); font-family: sans-serif;">${num}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -10]
+    });
+
+    // --- Logic ---
+    function loadDay(dayNum) {
+        // Update Tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-btn')[dayNum-1].classList.add('active');
+
+        // Clear Map
+        currentMarkers.forEach(m => map.removeLayer(m));
+        currentMarkers = [];
+        if (currentPolyline) map.removeLayer(currentPolyline);
+
+        const dayData = itinerary[dayNum];
+        document.getElementById('day-title').innerText = dayData.title;
+        
+        const timelineContainer = document.getElementById('timeline');
+        timelineContainer.innerHTML = '';
+
+        const latlngs = [];
+
+        dayData.items.forEach((item, index) => {
+            // 1. Build Timeline
+            const div = document.createElement('div');
+            div.className = 'timeline-item';
+            
+            let linksHtml = '';
+            if (item.links) {
+                linksHtml = `<div class="links">` + 
+                    item.links.map(l => `<a href="${l.url}" class="link-btn" target="_blank">${l.label}</a>`).join('') + 
+                    `</div>`;
+            }
+
+            div.innerHTML = `
+                <div class="timeline-marker">${index + 1}</div>
+                <span class="time">${item.time}</span>
+                <h3 class="activity">${item.activity}</h3>
+                <div class="location">📍 ${item.location}</div>
+                <div class="transport">🚍 ${item.transport}</div>
+                <div class="notes">${item.notes}</div>
+                ${linksHtml}
+            `;
+            timelineContainer.appendChild(div);
+
+            // 2. Add Map Markers
+            const marker = L.marker(item.coords, { icon: numberIcon(index + 1) })
+                .bindPopup(`
+                    <div class="custom-popup">
+                        <div class="popup-header">${item.activity}</div>
+                        <div class="popup-body">
+                            <span class="popup-time">${item.time}</span>
+                            ${item.notes}
+                        </div>
+                    </div>
+                `)
+                .addTo(map);
+            
+            // Add click event to timeline to zoom map
+            div.addEventListener('click', () => {
+                map.flyTo(item.coords, 15);
+                marker.openPopup();
+            });
+
+            currentMarkers.push(marker);
+            latlngs.push(item.coords);
+        });
+
+        // 3. Draw Route Line
+        if (latlngs.length > 1) {
+            currentPolyline = L.polyline(latlngs, {
+                color: '#2c3e50',
+                weight: 3,
+                opacity: 0.7,
+                dashArray: '5, 10'
+            }).addTo(map);
+            
+            // Fit bounds to show all points
+            map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50] });
+        } else if (latlngs.length === 1) {
+             map.setView(latlngs[0], 14);
+        }
+    }
+
+    // Initialize with Day 1
+    loadDay(1);
+
+</script>
+
+
+
+</body></html>
