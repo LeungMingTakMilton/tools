@@ -1,0 +1,725 @@
+<!DOCTYPE html><html><head><meta name="x-poe-datastore-behavior" content="local_only"><meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://code.jquery.com https://unpkg.com https://d3js.org https://threejs.org https://cdn.plot.ly https://stackpath.bootstrapcdn.com https://maps.googleapis.com https://cdn.tailwindcss.com https://ajax.googleapis.com https://kit.fontawesome.com https://cdn.datatables.net https://maxcdn.bootstrapcdn.com https://code.highcharts.com https://tako-static-assets-production.s3.amazonaws.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com https://pfst.cf2.poecdn.net https://puc.poecdn.net https://i.imgur.com https://wikimedia.org https://*.icons8.com https://*.giphy.com https://picsum.photos https://images.unsplash.com; frame-src 'self' https://www.youtube.com https://trytako.com; child-src 'self'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests; block-all-mixed-content;"><meta http-equiv="x-dns-prefetch-control" content="off"><script src="https://puc.poecdn.net/authenticated_preview_page/standard.3ef2c256959faf5a756d.js"></script>
+    <meta charset="utf-8">
+    <title>Privacy-Focused NER with Entity Masking</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="https://puc.poecdn.net/authenticated_preview_page/disableWebRTC.9710cebe07429a9e8e06.js"></script><meta name="x-poe-allow-downloads" content="true"><meta name="x-poe-datastore-behavior" content="disabled"><script src="https://puc.poecdn.net/authenticated_preview_page/tw.b9024aecac666455e183.js"></script><script src="https://puc.poecdn.net/authenticated_preview_page/deps.faccd16000d314dc16d5.js"></script><script src="https://puc.poecdn.net/authenticated_preview_page/exports.b0f0f482cdeb5302b0b9.js"></script><script src="https://puc.poecdn.net/authenticated_preview_page/renderer.75c73ae6b4235f62945a.js"></script><script>Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+
+
+
+
+var _lucidereact = require('lucide-react');
+
+// --- Configuration ---
+const ENTITY_COLORS = {
+  'PER': 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
+  'ORG': 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+  'LOC': 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
+  'MISC': 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
+  'REF': 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
+  'DATE': 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
+  'DEFAULT': 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+};
+
+const ENTITY_LABELS = {
+  PER: 'Person',
+  ORG: 'Organization',
+  LOC: 'Location',
+  MISC: 'Miscellaneous',
+  REF: 'Reference ID',
+  DATE: 'Date'
+};
+
+// Safe word limit per chunk to avoid model degradation
+const CHUNK_WORD_LIMIT = 250; 
+
+const DEFAULT_TEXT = `Invoice INV20251292 was sent to Jean-Luc Picard at Apple Inc. regarding contract ABC203629-205-B24 on 2025-12-30. Please file under FEK/EFI/GEJ-05.
+
+Furthermore, Sarah Connor from Cyberdyne Systems requested a meeting on 2025-01-15 regarding project Skynet. The meeting will be held in Los Angeles.
+
+(This text is short, but the system now supports processing thousands of words by breaking them into chunks automatically.)`;
+
+// --- Helper: Module Bridge Injection ---
+const loadTransformersModule = () => {
+  return new Promise((resolve, reject) => {
+    if (window.pipeline) {
+      resolve();
+      return;
+    }
+
+    const bridgeCode = `
+      import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+      
+      env.allowLocalModels = false;
+      env.useBrowserCache = true;
+      env.allowRemoteModels = true;
+      //env.backends.onnx.wasm.wasmPaths = './sample/';
+
+      // Expose to global scope
+      window.pipeline = pipeline;
+      window.env = env;
+      window.pipeline = pipeline;
+      window.env = env;
+
+      window.dispatchEvent(new Event('transformers-ready'));
+    `;
+
+    const blob = new Blob([bridgeCode], { type: 'text/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = blobUrl;
+    
+    const handleReady = () => {
+      cleanup();
+      resolve();
+    };
+
+    const handleError = (e) => {
+      cleanup();
+      reject(new Error("Failed to load module from CDN. Check your internet connection or CSP settings."));
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('transformers-ready', handleReady);
+      script.removeEventListener('error', handleError);
+      URL.revokeObjectURL(blobUrl);
+    };
+
+    window.addEventListener('transformers-ready', handleReady);
+    script.addEventListener('error', handleError);
+
+    document.body.appendChild(script);
+  });
+};
+
+function NerAnalyzer() {
+  // --- State ---
+  const [inputText, setInputText] = _react.useState.call(void 0, DEFAULT_TEXT);
+  const [status, setStatus] = _react.useState.call(void 0, 'idle');
+  const [progress, setProgress] = _react.useState.call(void 0, 0); // 0-100
+  const [chunkProgress, setChunkProgress] = _react.useState.call(void 0, { current: 0, total: 0 });
+  const [entities, setEntities] = _react.useState.call(void 0, []);
+  const [maskedText, setMaskedText] = _react.useState.call(void 0, '');
+  const [errorMessage, setErrorMessage] = _react.useState.call(void 0, '');
+  const [debugLog, setDebugLog] = _react.useState.call(void 0, []);
+  const [copySuccess, setCopySuccess] = _react.useState.call(void 0, false);
+  const [newEntityText, setNewEntityText] = _react.useState.call(void 0, '');
+  const [newEntityType, setNewEntityType] = _react.useState.call(void 0, 'PER');
+  
+  const pipelineRef = _react.useRef.call(void 0, null);
+
+  // --- Logic ---
+
+  const addLog = (msg) => {
+    setDebugLog(prev => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
+  };
+
+  /**
+   * Splits text into chunks based on word count, respecting whitespace boundaries.
+   * Returns array of { text: string, offset: number }
+   */
+  const createChunks = (text, wordLimit) => {
+    const chunks = [];
+    let currentOffset = 0;
+    
+    // We loop through the text to find split points
+    while (currentOffset < text.length) {
+      const remainingText = text.slice(currentOffset);
+      
+      // If remaining text is short enough, take it all
+      const words = remainingText.split(/\s+/);
+      if (words.length <= wordLimit) {
+        chunks.push({
+          text: remainingText,
+          offset: currentOffset
+        });
+        break;
+      }
+
+      // Otherwise, find the split point at the wordLimit
+      // We join the first N words to find the approximate length
+      const splitCandidate = words.slice(0, wordLimit).join(' ');
+      
+      // Find the last whitespace within this candidate length to be safe
+      // or just use the length of the candidate + 1 (for the space)
+      let splitLength = splitCandidate.length;
+
+      // Ensure we are actually at a boundary in the original text
+      // (Check if the character after splitLength is whitespace)
+      while (splitLength < remainingText.length && !/\s/.test(remainingText[splitLength])) {
+        splitLength++; // Advance to next whitespace if we landed inside a word (rare with join, but safe)
+      }
+
+      chunks.push({
+        text: remainingText.slice(0, splitLength),
+        offset: currentOffset
+      });
+
+      currentOffset += splitLength;
+      
+      // Skip any leading whitespace for the next chunk to keep offsets clean
+      while (currentOffset < text.length && /\s/.test(text[currentOffset])) {
+        currentOffset++;
+      }
+    }
+    
+    return chunks;
+  };
+
+  const generateMaskedText = _react.useCallback.call(void 0, (text, entitiesToMask) => {
+    if (!entitiesToMask || entitiesToMask.length === 0) return text;
+
+    const sortedEntities = [...entitiesToMask]
+      .filter(e => (e.start !== undefined && e.end !== undefined) || e.isManual)
+      .sort((a, b) => {
+         if (a.start !== undefined && b.start !== undefined) {
+             return b.start - a.start;
+         }
+         return 0;
+      });
+
+    let result = text;
+    let manualEntities = [];
+
+    sortedEntities.forEach(entity => {
+      const type = entity.entity_group || entity.entity || 'MISC';
+      const mask = `[${type.toUpperCase()}]`;
+
+      if (entity.isManual) {
+        manualEntities.push(entity);
+      } else if (entity.start !== null && entity.end !== null) {
+        const before = result.slice(0, entity.start);
+        const after = result.slice(entity.end);
+        result = before + mask + after;
+      }
+    });
+
+    manualEntities.forEach(entity => {
+       const regex = new RegExp(entity.word.replace(/[.*+?^${}()|[]]/g, '\\$&'), 'gi');
+       const mask = `[${(entity.entity || 'MISC').toUpperCase()}]`;
+       result = result.replace(regex, mask);
+    });
+
+    return result;
+  }, []);
+
+  _react.useEffect.call(void 0, () => {
+    if (entities.length > 0 && inputText) {
+      const masked = generateMaskedText(inputText, entities);
+      setMaskedText(masked);
+    } else {
+      setMaskedText('');
+    }
+  }, [entities, inputText, generateMaskedText]);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(maskedText);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const addManualEntity = () => {
+    if (!newEntityText.trim()) return;
+    setEntities(prev => [...prev, {
+      word: newEntityText.trim(),
+      entity: newEntityType,
+      score: 1.0,
+      isManual: true
+    }]);
+    setNewEntityText('');
+  };
+
+  const removeEntity = (index) => {
+    setEntities(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const replaceAll = () => {
+    const masked = generateMaskedText(inputText, entities);
+    setMaskedText(masked);
+  };
+
+  const detectRegexEntities = (text) => {
+    const regexEntities = [];
+    const patterns = [
+      { type: 'DATE', regex: /\b(?:\d{4}[-./]\d{2}[-./]\d{2}|\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|(?:19|20)\d{6}|\d{1,2}(?:st|nd|rd|th)?[-.\s/]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-.\s/,]*\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-.\s/]*\d{1,2}(?:st|nd|rd|th)?(?:[-.\s/,]*\d{2,4})?)\b/gi },
+      { 
+		type: 'REF', 
+		// regex: /\b(?:INV\d+)\b|\b[A-Z0-9]{2,}(?:[-/][A-Z0-9]+)+\b/g 
+		//regex: /\b(?:INV\d+)\b|\b[A-Z0-9]{2,}(?:[-/][A-Z0-9]+)+\b|\b\d{4} ?\d{4}\b/g 
+        regex: /\b(?:INV\d+)\b|\b[A-Z0-9]{2,}(?:[-/][A-Z0-9]+)+\b|\b\d{4} ?\d{4}\b|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g 
+	  },
+    ];
+
+    patterns.forEach(({ type, regex }) => {
+      let match;
+      regex.lastIndex = 0;
+      while ((match = regex.exec(text)) !== null) {
+        regexEntities.push({
+          word: match[0],
+          entity: type,
+          score: 1.0,
+          start: match.index,
+          end: match.index + match[0].length,
+          isRegex: true
+        });
+      }
+    });
+    return regexEntities;
+  };
+
+  /**
+   * Maps tokens to indices relative to the CHUNK, then adds globalOffset.
+   */
+  const processTokens = (chunkText, rawTokens, globalOffset) => {
+    let cursor = 0;
+    const mappedTokens = [];
+
+    // 1. Map tokens to chunk text
+    for (const token of rawTokens) {
+      const cleanWord = token.word.replace(/^##/, '');
+      const index = chunkText.toLowerCase().indexOf(cleanWord.toLowerCase(), cursor);
+      
+      if (index !== -1) {
+        const start = index;
+        const end = index + cleanWord.length;
+        
+        mappedTokens.push({
+          ...token,
+          // IMPORTANT: Add globalOffset to make indices valid for the full text
+          start: start + globalOffset,
+          end: end + globalOffset,
+          originalText: chunkText.slice(start, end) 
+        });
+        
+        cursor = end;
+      } else {
+        mappedTokens.push({ ...token, start: null, end: null });
+      }
+    }
+
+    // 2. Filter & Merge
+    const entityTokens = mappedTokens.filter(t => t.entity !== 'O' && t.start !== null);
+    const mergedEntities = [];
+    let current = null;
+
+    for (const token of entityTokens) {
+      const [prefix, type] = token.entity.includes('-') ? token.entity.split('-') : ['B', token.entity];
+
+      if (current) {
+        const isSameType = current.entity === type;
+        const isContinuation = prefix === 'I' || token.word.startsWith('##');
+        
+        if (isSameType && isContinuation) {
+          current.end = token.end;
+          // We can't slice from 'text' here easily because 'text' isn't passed fully.
+          // But we know the start/end are global.
+          // We'll reconstruct the word later or just append for now.
+          current.word += token.originalText.startsWith(' ') ? token.originalText : token.originalText; 
+          current.score = Math.min(current.score, token.score);
+          continue;
+        } else {
+          mergedEntities.push(current);
+          current = null;
+        }
+      }
+
+      current = {
+        entity: type,
+        word: token.originalText,
+        start: token.start,
+        end: token.end,
+        score: token.score
+      };
+    }
+
+    if (current) mergedEntities.push(current);
+    return mergedEntities;
+  };
+
+  const analyzeText = async () => {
+    if (!inputText.trim()) return;
+
+    try {
+      setErrorMessage('');
+      setEntities([]);
+      setMaskedText('');
+      setDebugLog([]); 
+      setChunkProgress({ current: 0, total: 0 });
+      
+      if (!pipelineRef.current) {
+        setStatus('loading_model');
+        addLog("Initializing Module Bridge...");
+        try {
+            await loadTransformersModule();
+        } catch (scriptErr) {
+            throw new Error(`Module Load Failed: ${scriptErr.message}`);
+        }
+
+        const pipelineFn = window.pipeline;
+        if (!pipelineFn) throw new Error("Pipeline missing.");
+
+        addLog("Loading local NER model...");
+        pipelineRef.current = await pipelineFn('token-classification', 'Xenova/bert-base-NER', { //'./NER/models/models/sample', { //
+          local_files_only: false,
+          progress_callback: (data) => {
+            if (data.status === 'progress') setProgress(Math.round(data.progress));
+          }
+        });
+        addLog("Model ready.");
+      }
+
+      setStatus('analyzing');
+      
+      // 1. Create Chunks
+      const chunks = createChunks(inputText, CHUNK_WORD_LIMIT);
+      addLog(`Text split into ${chunks.length} chunks (Limit: ${CHUNK_WORD_LIMIT} words).`);
+      setChunkProgress({ current: 0, total: chunks.length });
+
+      let allOnnxEntities = [];
+
+      // 2. Process Chunks Sequentially
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        setChunkProgress({ current: i + 1, total: chunks.length });
+        addLog(`Processing Chunk ${i + 1}/${chunks.length} (Length: ${chunk.text.length} chars)...`);
+
+        const output = await pipelineRef.current(chunk.text, { ignore_labels: [] });
+        
+        // Pass global offset to mapper
+        const chunkEntities = processTokens(chunk.text, output, chunk.offset);
+        
+        // Fix word reconstruction (since simple concatenation in processTokens might miss spaces between tokens if logic was loose)
+        // We can just slice the original full text to be 100% sure of the word content
+        const correctedEntities = chunkEntities.map(e => ({
+            ...e,
+            word: inputText.slice(e.start, e.end)
+        }));
+
+        allOnnxEntities = [...allOnnxEntities, ...correctedEntities];
+      }
+
+      // 3. Get Regex Entities (Global scan is fast enough usually, or could also chunk if needed, but regex is fast)
+      const regexEntities = detectRegexEntities(inputText);
+      addLog(`Found ${regexEntities.length} regex entities.`);
+
+      // 4. Combine & Deduplicate
+      // (Simple dedupe: if start indices match, take the one with longer length or higher score)
+      const combined = [...allOnnxEntities, ...regexEntities];
+      
+      // Sort by start position
+      combined.sort((a, b) => (a.start || 0) - (b.start || 0));
+
+      setEntities(combined);
+      setStatus('ready');
+
+    } catch (err) {
+      console.error("Analysis Error:", err);
+      setErrorMessage(err.message || "An unexpected error occurred.");
+      setStatus('error');
+    }
+  };
+
+  const reset = () => {
+    setEntities([]);
+    setMaskedText('');
+    setStatus('idle');
+    setErrorMessage('');
+    setProgress(0);
+    setDebugLog([]);
+    setCopySuccess(false);
+    setNewEntityText('');
+    setChunkProgress({ current: 0, total: 0 });
+  };
+
+  // --- Render ---
+
+  return (
+    _react2.default.createElement('div', { className: "w-full max-w-5xl mx-auto p-6 bg-white rounded-xl shadow-sm border border-slate-200 font-sans"         ,}
+
+      /* Header */
+      , _react2.default.createElement('div', { className: "mb-8",}
+        , _react2.default.createElement('div', { className: "flex items-center gap-3 mb-2"   ,}
+          , _react2.default.createElement('div', { className: "p-2 bg-indigo-50 rounded-lg"  ,}
+            , _react2.default.createElement(_lucidereact.Brain, { className: "w-6 h-6 text-indigo-600"  ,} )
+          )
+          , _react2.default.createElement('h1', { className: "text-2xl font-bold text-slate-900"  ,}, "Privacy-Focused NER with Entity Masking"    )
+        )
+        , _react2.default.createElement('p', { className: "text-slate-500 leading-relaxed" ,}, "Extract sensitive entities (Names, Orgs, Dates, References) and mask them. "
+                    , _react2.default.createElement('br', null)
+          , _react2.default.createElement('span', { className: "text-xs font-medium bg-slate-100 px-2 py-0.5 rounded text-slate-600"      ,}, "Supports Long Text (Auto-Chunking)"
+
+          )
+        )
+      )
+
+      /* Input Area */
+      , _react2.default.createElement('div', { className: "space-y-4 mb-8" ,}
+        , _react2.default.createElement('div', { className: "relative group" ,}
+          , _react2.default.createElement('div', { className: "flex justify-between items-end mb-2"   ,}
+            , _react2.default.createElement('label', { className: "block text-sm font-semibold text-slate-700"   ,}, "Original Text" )
+            , _react2.default.createElement('span', { className: "text-xs text-slate-400" ,}
+              , inputText.split(/\s+/).filter(w => w.length > 0).length, " words"
+            )
+          )
+          , _react2.default.createElement('textarea', {
+            value: inputText,
+            onChange: (e) => setInputText(e.target.value),
+            disabled: status === 'loading_model' || status === 'analyzing',
+            className: "w-full h-48 p-4 text-slate-700 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none bg-slate-50 transition-all disabled:opacity-60 disabled:cursor-not-allowed text-sm leading-relaxed"                 ,
+            placeholder: "Enter text to analyze..."   ,}
+          )
+          , inputText && status === 'idle' && (
+             _react2.default.createElement('button', { 
+               onClick: () => setInputText(''),
+               className: "absolute top-10 right-3 text-xs text-slate-400 hover:text-slate-600 font-medium bg-white px-2 py-1 rounded border border-slate-200 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"                ,}
+, "Clear"
+
+             )
+          )
+        )
+
+        /* Controls */
+        , _react2.default.createElement('div', { className: "flex flex-wrap items-center justify-between gap-4"    ,}
+          , _react2.default.createElement('button', {
+            onClick: analyzeText,
+            disabled: status !== 'idle' && status !== 'ready' && status !== 'error',
+            className: `flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold transition-all shadow-sm
+              ${status !== 'idle' && status !== 'ready' && status !== 'error'
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-md active:transform active:scale-95'
+              }`,}
+
+            , status === 'loading_model' ? (
+              _react2.default.createElement(_react2.default.Fragment, null
+                , _react2.default.createElement(_lucidereact.Loader2, { className: "w-4 h-4 animate-spin"  ,} )
+                , _react2.default.createElement('span', null, "Loading Model ("  , progress, "%)")
+              )
+            ) : status === 'analyzing' ? (
+              _react2.default.createElement(_react2.default.Fragment, null
+                , _react2.default.createElement(_lucidereact.Loader2, { className: "w-4 h-4 animate-spin"  ,} )
+                , _react2.default.createElement('span', null, "Processing Chunk "
+                     , chunkProgress.current, "/", chunkProgress.total
+                )
+              )
+            ) : (
+              _react2.default.createElement(_react2.default.Fragment, null
+                , _react2.default.createElement(_lucidereact.Play, { className: "w-4 h-4 fill-current"  ,} )
+                , _react2.default.createElement('span', null, "Analyze Text" )
+              )
+            )
+          )
+
+          , status === 'ready' && (
+             _react2.default.createElement('button', { 
+               onClick: reset,
+               className: "flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800 transition-colors"      ,}
+
+               , _react2.default.createElement(_lucidereact.RotateCcw, { className: "w-4 h-4" ,} ), " Reset"
+             )
+          )
+        )
+      )
+
+      /* Error State */
+      , status === 'error' && (
+        _react2.default.createElement('div', { className: "mb-6 p-4 bg-red-50 border border-red-100 rounded-lg flex items-start gap-3 text-red-700 animate-in fade-in slide-in-from-top-2"            ,}
+          , errorMessage.includes('CSP') ? (
+            _react2.default.createElement(_lucidereact.ShieldAlert, { className: "w-5 h-5 shrink-0 mt-0.5"   ,} )
+          ) : (
+            _react2.default.createElement(_lucidereact.AlertCircle, { className: "w-5 h-5 shrink-0 mt-0.5"   ,} )
+          )
+          , _react2.default.createElement('div', { className: "flex-1 overflow-hidden" ,}
+            , _react2.default.createElement('h3', { className: "font-semibold",}, "Analysis Failed" )
+            , _react2.default.createElement('p', { className: "text-sm opacity-90 mt-1 whitespace-pre-wrap break-words"    ,}, errorMessage)
+            , _react2.default.createElement('button', { 
+              onClick: () => setStatus('idle'),
+              className: "mt-3 text-xs font-semibold underline hover:no-underline"    ,}
+, "Try Again"
+
+            )
+          )
+        )
+      )
+
+      /* Results State */
+      , status === 'ready' && (
+        _react2.default.createElement('div', { className: "animate-in slide-in-from-bottom-4 duration-500 space-y-6"   ,}
+
+          /* Detected Entities */
+          , _react2.default.createElement('div', null
+            , _react2.default.createElement('div', { className: "flex items-center gap-2 mb-4 pb-2 border-b border-slate-100"      ,}
+              , _react2.default.createElement(_lucidereact.CheckCircle2, { className: "w-5 h-5 text-green-500"  ,} )
+              , _react2.default.createElement('h3', { className: "font-semibold text-slate-800" ,}, "Detected Entities" )
+              , _react2.default.createElement('span', { className: "text-xs text-slate-500 ml-auto"  ,}, entities.length, " detected" )
+            )
+
+            , entities.length > 0 ? (
+              _react2.default.createElement('div', { className: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"   ,}
+                , entities.map((entity, index) => {
+                  const type = entity.entity || 'DEFAULT';
+                  const colorClass = ENTITY_COLORS[type] || ENTITY_COLORS.DEFAULT;
+                  const label = ENTITY_LABELS[type] || type;
+
+                  return (
+                    _react2.default.createElement('div', { 
+                      key: `${entity.word}-${index}`,
+                      className: `flex items-center justify-between p-3 rounded-lg border ${colorClass} transition-all hover:scale-[1.01] group`,}
+
+                      , _react2.default.createElement('div', { className: "flex flex-col flex-1 min-w-0"   ,}
+                        , _react2.default.createElement('span', { className: "font-bold text-sm leading-tight truncate"   , title: entity.word,}, entity.word)
+                        , _react2.default.createElement('div', { className: "flex items-center gap-2 mt-1"   ,}
+                          , _react2.default.createElement('span', { className: "text-[10px] uppercase tracking-wider opacity-70 font-bold"    ,}
+                            , label
+                          )
+                          , entity.start !== undefined && (
+                            _react2.default.createElement('span', { className: "text-[9px] font-mono opacity-50 bg-white/50 px-1 rounded"     ,}, "idx:"
+                              , entity.start
+                            )
+                          )
+                        )
+                      )
+                      , _react2.default.createElement('button', {
+                        onClick: () => removeEntity(index),
+                        className: "opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-700 p-1"     ,
+                        title: "Remove entity" ,}
+
+                        , _react2.default.createElement(_lucidereact.Trash2, { className: "w-3.5 h-3.5" ,} )
+                      )
+                    )
+                  );
+                })
+              )
+            ) : (
+              _react2.default.createElement('div', { className: "text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200"      ,}
+                , _react2.default.createElement('p', { className: "text-slate-500 font-medium" ,}, "No entities detected."  )
+              )
+            )
+          )
+
+          /* Add Manual Entity */
+          , _react2.default.createElement('div', { className: "border-t border-slate-100 pt-6"  ,}
+            , _react2.default.createElement('div', { className: "flex items-center gap-2 mb-4"   ,}
+              , _react2.default.createElement(_lucidereact.Plus, { className: "w-5 h-5 text-slate-600"  ,} )
+              , _react2.default.createElement('h3', { className: "font-semibold text-slate-800" ,}, "Add Custom Entity"  )
+            )
+            , _react2.default.createElement('div', { className: "flex gap-3" ,}
+              , _react2.default.createElement('input', {
+                type: "text",
+                value: newEntityText,
+                onChange: (e) => setNewEntityText(e.target.value),
+                onKeyPress: (e) => e.key === 'Enter' && addManualEntity(),
+                placeholder: "Enter text to mask..."   ,
+                className: "flex-1 px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm"          ,}
+              )
+              , _react2.default.createElement('select', {
+                value: newEntityType,
+                onChange: (e) => setNewEntityType(e.target.value),
+                className: "px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none bg-white text-sm"          ,}
+
+                , Object.entries(ENTITY_LABELS).map(([key, label]) => (
+                  _react2.default.createElement('option', { key: key, value: key,}, label)
+                ))
+              )
+              , _react2.default.createElement('button', {
+                onClick: addManualEntity,
+                disabled: !newEntityText.trim(),
+                className: "px-6 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-all text-sm"           ,}
+, "Add"
+
+              )
+            )
+          )
+
+          /* Masked Text Output */
+          , maskedText && (
+            _react2.default.createElement('div', { className: "border-t border-slate-100 pt-6"  ,}
+              , _react2.default.createElement('div', { className: "flex items-center justify-between mb-4"   ,}
+                , _react2.default.createElement('div', { className: "flex items-center gap-2"  ,}
+                  , _react2.default.createElement(_lucidereact.Eye, { className: "w-5 h-5 text-slate-600"  ,} )
+                  , _react2.default.createElement('h3', { className: "font-semibold text-slate-800" ,}, "Masked Text" )
+                )
+                , _react2.default.createElement('div', { className: "flex gap-2" ,}
+                  , _react2.default.createElement('button', {
+                    onClick: replaceAll,
+                    className: "flex items-center gap-2 px-3 py-1.5 text-xs bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all"          ,}
+
+                    , _react2.default.createElement(_lucidereact.RefreshCw, { className: "w-3 h-3" ,} ), "Regenerate"
+
+                  )
+                  , _react2.default.createElement('button', {
+                    onClick: copyToClipboard,
+                    className: `flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg transition-all ${
+                      copySuccess 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    }`,}
+
+                    , copySuccess ? (
+                      _react2.default.createElement(_react2.default.Fragment, null
+                        , _react2.default.createElement(_lucidereact.Check, { className: "w-3 h-3" ,} ), "Copied"
+
+                      )
+                    ) : (
+                      _react2.default.createElement(_react2.default.Fragment, null
+                        , _react2.default.createElement(_lucidereact.Copy, { className: "w-3 h-3" ,} ), "Copy"
+
+                      )
+                    )
+                  )
+                )
+              )
+              , _react2.default.createElement('div', { className: "relative",}
+                , _react2.default.createElement('textarea', {
+                  value: maskedText,
+                  readOnly: true,
+                  className: "w-full h-48 p-4 text-slate-700 border border-slate-200 rounded-xl bg-amber-50/30 font-mono text-sm resize-none leading-relaxed"           ,}
+                )
+              )
+            )
+          )
+        )
+      )
+
+      /* Debug/Status Log */
+      , (status === 'loading_model' || status === 'analyzing' || status === 'error') && debugLog.length > 0 && (
+        _react2.default.createElement('div', { className: "mt-6 border-t border-slate-100 pt-4"   ,}
+           , _react2.default.createElement('div', { className: "flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2"        ,}
+             , _react2.default.createElement(_lucidereact.Terminal, { className: "w-3 h-3" ,} )
+             , _react2.default.createElement('span', null, "Process Log" )
+           )
+           , _react2.default.createElement('div', { className: "bg-slate-900 rounded-lg p-3 font-mono text-[10px] text-slate-300 max-h-32 overflow-y-auto"       ,}
+             , debugLog.map((log, i) => (
+               _react2.default.createElement('div', { key: i, className: "mb-1 last:mb-0 border-l-2 border-slate-700 pl-2"    ,}
+                 , log
+               )
+             ))
+           )
+        )
+      )
+
+      /* Footer */
+      , _react2.default.createElement('div', { className: "mt-8 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400"        ,}
+        , _react2.default.createElement('div', { className: "flex items-center gap-1.5"  ,}
+          , _react2.default.createElement(_lucidereact.Network, { className: "w-3 h-3" ,} )
+          , _react2.default.createElement('span', null, "Local ONNX Model + Regex"    )
+        )
+        , _react2.default.createElement('div', { className: "flex items-center gap-1.5"  ,}
+           , _react2.default.createElement(_lucidereact.Layers, { className: "w-3 h-3" ,} )
+           , _react2.default.createElement('span', null, "Chunk Size: "  , CHUNK_WORD_LIMIT, " words" )
+        )
+      )
+    )
+  );
+}
+
+exports. default = NerAnalyzer;
+</script></head>
+  <body>
+  
+
+<div id="preview-app"></div></body></html>
